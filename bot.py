@@ -390,12 +390,36 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("⬇️ جاري تحميل...")
         
         try:
-            gdown.download(
-                id=file_id,
-                output=ZIP_FILE,
-                quiet=False,
-                fuzzy=True
+            import requests
+            session = requests.Session()
+            # bypass virus scan
+            session.headers.update({"User-Agent": "Mozilla/5.0"})
+            # الخطوة 1: الحصول على confirm token
+            r = session.get(
+                f"https://drive.google.com/uc?export=download&id={file_id}",
+                allow_redirects=True
             )
+            # الخطوة 2: استخراج uuid من الـ response
+            import re as re2
+            uuid_match = re2.search(r'"([^"]+)"\s*:\s*"confirm"', r.text)
+            confirm_match = re2.search(r'confirm=([^&"]+)', r.text)
+            uuid_val = re2.search(r'uuid=([^&"]+)', r.text)
+            
+            params = {"export": "download", "id": file_id, "confirm": "t"}
+            if confirm_match:
+                params["confirm"] = confirm_match.group(1)
+            if uuid_val:
+                params["uuid"] = uuid_val.group(1)
+            
+            r2 = session.get(
+                "https://drive.google.com/uc",
+                params=params,
+                stream=True
+            )
+            with open(ZIP_FILE, "wb") as zf:
+                for chunk in r2.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        zf.write(chunk)
             
             await msg.edit_text("🔄 جاري استخراج...")
             
