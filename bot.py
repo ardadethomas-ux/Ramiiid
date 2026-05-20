@@ -390,31 +390,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("⬇️ جاري تحميل...")
         
         try:
-            import requests
-            session = requests.Session()
-            headers = {"User-Agent": "Mozilla/5.0"}
-            # الطلب الأول للحصول على confirm token
-            dl_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            response = session.get(dl_url, headers=headers, stream=True)
-            # البحث عن confirm token في الكوكيز أو الـ HTML
-            confirm = None
-            for key, value in response.cookies.items():
-                if key.startswith("download_warning"):
-                    confirm = value
-                    break
-            if not confirm:
-                # ابحث في الـ HTML
-                import re as re2
-                match = re2.search(r'confirm=([0-9A-Za-z_]+)', response.text)
-                if match:
-                    confirm = match.group(1)
-            if confirm:
-                dl_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm}"
-                response = session.get(dl_url, headers=headers, stream=True)
-            with open(ZIP_FILE, "wb") as zf:
-                for chunk in response.iter_content(chunk_size=1024*1024):
-                    if chunk:
-                        zf.write(chunk)
+            gdown.download(
+                id=file_id,
+                output=ZIP_FILE,
+                quiet=False,
+                fuzzy=True
+            )
             
             await msg.edit_text("🔄 جاري استخراج...")
             
