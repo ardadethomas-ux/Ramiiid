@@ -1,3 +1,5 @@
 python-telegram-bot==21.10
 gdown==5.2.0
 requests
+rarfile
+python-magic
