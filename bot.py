@@ -84,19 +84,14 @@ def extract_drive_id(url):
     return None
 
 async def convert_url_to_combo(url):
-    """تحويل URL إلى combo"""
     try:
-        # البحث عن النمط: :username:password أو :email:password
         match = re.search(r':([^/:]+:[^/]+)$', url)
         if match:
             return match.group(1).strip()
-        
-        # إذا كان الرابط يحتوي على : في النهاية
         if ':' in url:
             parts = url.split(':')
             if len(parts) >= 2:
                 return ':'.join(parts[-2:])
-        
         return None
     except:
         return None
@@ -224,7 +219,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة ملفات TXT"""
     load_all_data()
     user_id = str(update.effective_user.id)
     
@@ -281,7 +275,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for combo in combos:
             f.write(combo + "\n")
     
-    # تحديث الإحصائيات
     USERS_DB[user_id]["conversions"] += 1
     save_all_data()
     
@@ -294,11 +287,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⚡ النسبة: {success_percentage:.1f}%"
     )
     
-    await update.message.reply_document(
-        document=open(output_file, "rb"),
-        filename="combos_converted.txt",
-        caption=f"📥 Combos ({len(combos)})"
-    )
+    with open(output_file, "rb") as f:
+        await update.message.reply_document(
+            document=f,
+            filename="combos_converted.txt",
+            caption=f"📥 Combos ({len(combos)})"
+        )
     
     os.remove("temp_file.txt")
 
@@ -390,10 +384,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await search_msg.edit_text(f"✅ تم! النتائج: {len(results)}")
         
-        await update.message.reply_document(
-            document=open(result_file, "rb"),
-            filename="results.txt"
-        )
+        with open(result_file, "rb") as f:
+            await update.message.reply_document(
+                document=f,
+                filename="results.txt"
+            )
 
 async def addcode_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     load_all_data()
