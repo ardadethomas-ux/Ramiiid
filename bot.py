@@ -329,8 +329,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("⬇️ جاري تحميل...")
         
         try:
-            url = f"https://drive.google.com/uc?id={file_id}"
-            gdown.download(url, ZIP_FILE, quiet=False, fuzzy=True, use_cookies=False)
+            import requests
+            session = requests.Session()
+            dl_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+            response = session.get(dl_url, stream=True)
+            for key, value in response.cookies.items():
+                if key.startswith("download_warning"):
+                    dl_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={value}"
+                    response = session.get(dl_url, stream=True)
+                    break
+            with open(ZIP_FILE, "wb") as zf:
+                for chunk in response.iter_content(chunk_size=32768):
+                    if chunk:
+                        zf.write(chunk)
             
             await msg.edit_text("🔄 جاري استخراج...")
             
