@@ -331,18 +331,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             token = guest["data"]["token"]
             # الحصول على معلومات الملف
             info = requests.get(
-                f"https://api.gofile.io/contents/{code}?wt=4fd6sg89d7s6",
+                f"https://api.gofile.io/contents/{code}",
                 headers={"Authorization": f"Bearer {token}"}
             ).json()
-            if info["status"] != "ok":
-                await msg.edit_text("❌ رابط Gofile غير صحيح")
+            if info.get("status") != "ok":
+                await msg.edit_text(f"❌ خطأ Gofile: {str(info)[:100]}")
                 return
-            # البحث عن أول ملف zip
-            contents = info["data"]["children"]
+            # البحث عن أول ملف
+            children = info["data"].get("children", {})
             dl_url = None
-            for item in contents.values():
-                if item["type"] == "file":
-                    dl_url = item["link"]
+            for item in children.values():
+                if item.get("type") == "file":
+                    dl_url = item.get("link") or item.get("directLink")
                     break
             if not dl_url:
                 await msg.edit_text("❌ ما لقيناش ملف في الرابط")
@@ -350,7 +350,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # تحميل الملف
             response = requests.get(
                 dl_url,
-                headers={"Authorization": f"Bearer {token}", "Cookie": f"accountToken={token}"},
+                headers={"Authorization": f"Bearer {token}"},
+                cookies={"accountToken": token},
                 stream=True
             )
             total_size = int(response.headers.get("content-length", 0))
@@ -391,15 +392,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             import requests
             session = requests.Session()
-            dl_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
-            response = session.get(dl_url, stream=True)
+            headers = {"User-Agent": "Mozilla/5.0"}
+            # الطلب الأول للحصول على confirm token
+            dl_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            response = session.get(dl_url, headers=headers, stream=True)
+            # البحث عن confirm token في الكوكيز أو الـ HTML
+            confirm = None
             for key, value in response.cookies.items():
                 if key.startswith("download_warning"):
-                    dl_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={value}"
-                    response = session.get(dl_url, stream=True)
+                    confirm = value
                     break
+            if not confirm:
+                # ابحث في الـ HTML
+                import re as re2
+                match = re2.search(r'confirm=([0-9A-Za-z_]+)', response.text)
+                if match:
+                    confirm = match.group(1)
+            if confirm:
+                dl_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm}"
+                response = session.get(dl_url, headers=headers, stream=True)
             with open(ZIP_FILE, "wb") as zf:
-                for chunk in response.iter_content(chunk_size=32768):
+                for chunk in response.iter_content(chunk_size=1024*1024):
                     if chunk:
                         zf.write(chunk)
             
