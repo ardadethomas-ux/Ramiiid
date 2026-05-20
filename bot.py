@@ -320,6 +320,66 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "normal"
         return
     
+    if "gofile.io" in text:
+        msg = await update.message.reply_text("⬇️ جاري تحميل من Gofile...")
+        try:
+            import requests
+            # استخراج file id من الرابط
+            code = text.strip().split("/")[-1].split("?")[0]
+            # الحصول على token مجاني
+            guest = requests.post("https://api.gofile.io/accounts").json()
+            token = guest["data"]["token"]
+            # الحصول على معلومات الملف
+            info = requests.get(
+                f"https://api.gofile.io/contents/{code}?wt=4fd6sg89d7s6",
+                headers={"Authorization": f"Bearer {token}"}
+            ).json()
+            if info["status"] != "ok":
+                await msg.edit_text("❌ رابط Gofile غير صحيح")
+                return
+            # البحث عن أول ملف zip
+            contents = info["data"]["children"]
+            dl_url = None
+            for item in contents.values():
+                if item["type"] == "file":
+                    dl_url = item["link"]
+                    break
+            if not dl_url:
+                await msg.edit_text("❌ ما لقيناش ملف في الرابط")
+                return
+            # تحميل الملف
+            response = requests.get(
+                dl_url,
+                headers={"Authorization": f"Bearer {token}", "Cookie": f"accountToken={token}"},
+                stream=True
+            )
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
+            with open(ZIP_FILE, "wb") as zf:
+                for chunk in response.iter_content(chunk_size=1024*1024):
+                    if chunk:
+                        zf.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = (downloaded / total_size) * 100
+                            if downloaded % (1024*1024*100) < 1024*1024:
+                                await msg.edit_text(
+                                    f"⬇️ جاري التحميل...\n\n"
+                                    f"📊 {percent:.1f}%\n"
+                                    f"💾 {downloaded//1024//1024}MB / {total_size//1024//1024}MB"
+                                )
+            await msg.edit_text("🔄 جاري استخراج...")
+            if os.path.exists(DATA_DIR):
+                shutil.rmtree(DATA_DIR)
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with zipfile.ZipFile(ZIP_FILE, 'r') as zip_ref:
+                zip_ref.extractall(DATA_DIR)
+            txt_files = list(Path(DATA_DIR).rglob("*.txt"))
+            await msg.edit_text(f"✅ تم التحميل!\n\n📄 الملفات: {len(txt_files)}")
+        except Exception as e:
+            await msg.edit_text(f"❌ خطأ: {str(e)[:100]}")
+        return
+
     if "drive.google.com" in text:
         file_id = extract_drive_id(text)
         if not file_id:
