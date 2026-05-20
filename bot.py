@@ -330,7 +330,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             url = f"https://drive.google.com/uc?id={file_id}"
-            gdown.download(url, ZIP_FILE, quiet=False, fuzzy=True)
+            gdown.download(url, ZIP_FILE, quiet=False, fuzzy=True, use_cookies=False)
             
             await msg.edit_text("🔄 جاري استخراج...")
             
