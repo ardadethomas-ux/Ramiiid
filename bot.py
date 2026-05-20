@@ -10,12 +10,28 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
+def extract_archive(archive_path, extract_to):
+    """يدعم ZIP و RAR و TXT"""
+    ext = archive_path.lower()
+    if ext.endswith(".zip"):
+        with zipfile.ZipFile(archive_path, 'r') as z:
+            z.extractall(extract_to)
+    elif ext.endswith(".rar"):
+        import rarfile
+        with rarfile.RarFile(archive_path) as r:
+            r.extractall(extract_to)
+    elif ext.endswith(".txt"):
+        # ملف TXT مباشرة — نحطه في مجلد الاستخراج
+        shutil.copy(archive_path, os.path.join(extract_to, "data.txt"))
+    else:
+        raise Exception("صيغة غير مدعومة — أرسل ZIP أو RAR أو TXT")
+
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "0").split(",")]
 DATA_DIR = "extracted_files"
-ZIP_FILE = "data.zip"
+ARCHIVE_FILE = "data_archive"
 CODES_FILE = "access_codes.json"
 USERS_FILE = "users_db.json"
 STATS_FILE = "stats.json"
@@ -326,13 +342,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import requests
             # استخراج file id من الرابط
             code = text.strip().split("/")[-1].split("?")[0]
-            # الحصول على token مجاني
+            # websiteToken الحالي
+            website_token = "abcde"
+            # الحصول على guest token
             guest = requests.post("https://api.gofile.io/accounts").json()
             token = guest["data"]["token"]
-            # الحصول على معلومات الملف
+            # الحصول على معلومات الملف مع websiteToken
             info = requests.get(
-                f"https://api.gofile.io/contents/{code}",
-                headers={"Authorization": f"Bearer {token}"}
+                f"https://api.gofile.io/contents/{code}?wt={website_token}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Cookie": f"accountToken={token}"
+                }
             ).json()
             if info.get("status") != "ok":
                 await msg.edit_text(f"❌ خطأ Gofile: {str(info)[:100]}")
@@ -340,23 +361,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # البحث عن أول ملف
             children = info["data"].get("children", {})
             dl_url = None
+            file_name = "data_archive"
             for item in children.values():
                 if item.get("type") == "file":
                     dl_url = item.get("link") or item.get("directLink")
+                    file_name = item.get("name", "data_archive")
                     break
             if not dl_url:
                 await msg.edit_text("❌ ما لقيناش ملف في الرابط")
                 return
+            # تحديد الامتداد تلقائياً
+            archive_path = f"data_archive_{file_name.split('.')[-1]}.{file_name.split('.')[-1]}"
             # تحميل الملف
             response = requests.get(
                 dl_url,
-                headers={"Authorization": f"Bearer {token}"},
-                cookies={"accountToken": token},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Cookie": f"accountToken={token}"
+                },
                 stream=True
             )
             total_size = int(response.headers.get("content-length", 0))
             downloaded = 0
-            with open(ZIP_FILE, "wb") as zf:
+            with open(archive_path, "wb") as zf:
                 for chunk in response.iter_content(chunk_size=1024*1024):
                     if chunk:
                         zf.write(chunk)
@@ -373,8 +400,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if os.path.exists(DATA_DIR):
                 shutil.rmtree(DATA_DIR)
             os.makedirs(DATA_DIR, exist_ok=True)
-            with zipfile.ZipFile(ZIP_FILE, 'r') as zip_ref:
-                zip_ref.extractall(DATA_DIR)
+            extract_archive(archive_path, DATA_DIR)
             txt_files = list(Path(DATA_DIR).rglob("*.txt"))
             await msg.edit_text(f"✅ تم التحميل!\n\n📄 الملفات: {len(txt_files)}")
         except Exception as e:
@@ -421,14 +447,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if chunk:
                         zf.write(chunk)
             
+            # تحديد نوع الملف
+            import magic
+            mime = magic.from_file(ZIP_FILE, mime=True)
+            if "zip" in mime:
+                archive_path = ZIP_FILE + ".zip"
+            elif "rar" in mime:
+                archive_path = ZIP_FILE + ".rar"
+            else:
+                archive_path = ZIP_FILE + ".txt"
+            os.rename(ZIP_FILE, archive_path)
+
             await msg.edit_text("🔄 جاري استخراج...")
             
             if os.path.exists(DATA_DIR):
                 shutil.rmtree(DATA_DIR)
             os.makedirs(DATA_DIR, exist_ok=True)
             
-            with zipfile.ZipFile(ZIP_FILE, 'r') as zip_ref:
-                zip_ref.extractall(DATA_DIR)
+            extract_archive(archive_path, DATA_DIR)
             
             txt_files = list(Path(DATA_DIR).rglob("*.txt"))
             
