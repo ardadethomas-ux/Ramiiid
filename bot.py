@@ -340,20 +340,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("⬇️ جاري تحميل من Gofile...")
         try:
             import requests
-            # استخراج file id من الرابط
+            from bs4 import BeautifulSoup
             code = text.strip().split("/")[-1].split("?")[0]
-            # websiteToken الحالي
-            website_token = "abcde"
+            session = requests.Session()
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://gofile.io/",
+                "Origin": "https://gofile.io"
+            }
             # الحصول على guest token
-            guest = requests.post("https://api.gofile.io/accounts").json()
+            guest = session.post("https://api.gofile.io/accounts", headers=headers).json()
             token = guest["data"]["token"]
-            # الحصول على معلومات الملف مع websiteToken
-            info = requests.get(
+            # الحصول على websiteToken من الـ JS ديال الموقع
+            js_resp = session.get("https://gofile.io/dist/js/alljs.js", headers=headers)
+            import re as re2
+            wt_match = re2.search(r'fetchData\.wt\s*=\s*["\']([^"\']+)["\']', js_resp.text)
+            website_token = wt_match.group(1) if wt_match else "4fd6sg89d7s6"
+            # الحصول على معلومات الملف
+            info = session.get(
                 f"https://api.gofile.io/contents/{code}?wt={website_token}",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Cookie": f"accountToken={token}"
-                }
+                headers={**headers, "Authorization": f"Bearer {token}"}
             ).json()
             if info.get("status") != "ok":
                 await msg.edit_text(f"❌ خطأ Gofile: {str(info)[:100]}")
@@ -361,26 +367,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # البحث عن أول ملف
             children = info["data"].get("children", {})
             dl_url = None
-            file_name = "data_archive"
+            file_name = "data_archive.zip"
             for item in children.values():
                 if item.get("type") == "file":
                     dl_url = item.get("link") or item.get("directLink")
-                    file_name = item.get("name", "data_archive")
+                    file_name = item.get("name", "data_archive.zip")
                     break
             if not dl_url:
                 await msg.edit_text("❌ ما لقيناش ملف في الرابط")
                 return
-            # تحديد الامتداد تلقائياً
-            archive_path = f"data_archive_{file_name.split('.')[-1]}.{file_name.split('.')[-1]}"
+            ext = file_name.split(".")[-1].lower()
+            archive_path = f"data_archive.{ext}"
             # تحميل الملف
-            response = requests.get(
+            response = session.get(
                 dl_url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Cookie": f"accountToken={token}"
-                },
+                headers={**headers, "Authorization": f"Bearer {token}"},
+                cookies={"accountToken": token},
                 stream=True
             )
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
             total_size = int(response.headers.get("content-length", 0))
             downloaded = 0
             with open(archive_path, "wb") as zf:
