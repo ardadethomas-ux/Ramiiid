@@ -1,36 +1,46 @@
-import os
 import re
 import logging
 import gdown
 import zipfile
 import shutil
 import json
-from datetime import datetime, timedelta
-from pathlib import Path
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+import os
 
-def extract_archive(archive_path, extract_to):
-    ext = archive_path.lower()
-    if ext.endswith(".zip"):
-        with zipfile.ZipFile(archive_path, 'r') as z:
-            z.extractall(extract_to)
-    elif ext.endswith(".rar"):
-        import rarfile
-        with rarfile.RarFile(archive_path) as r:
-            r.extractall(extract_to)
-    elif ext.endswith(".txt"):
-        shutil.copy(archive_path, os.path.join(extract_to, "data.txt"))
-    else:
-        raise Exception("صيغة غير مدعومة — أرسل ZIP أو RAR أو TXT")
+from datetime import datetime
+from pathlib import Path
+
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    CallbackQueryHandler
+)
 
 logging.basicConfig(level=logging.INFO)
 
+# =========================
+# CONFIG
+# =========================
+
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "0").split(",")]
+
+ADMIN_IDS = [
+    int(x)
+    for x in os.environ.get("ADMIN_IDS", "").split(",")
+    if x.strip()
+]
+
 DATA_DIR = "extracted_files"
-ARCHIVE_FILE = "data_archive"
 ZIP_FILE = "data.zip"
+
 CODES_FILE = "access_codes.json"
 USERS_FILE = "users_db.json"
 STATS_FILE = "stats.json"
@@ -39,96 +49,214 @@ ACCESS_CODES = {}
 USERS_DB = {}
 STATS = {}
 
+# =========================
+# LOAD DATA
+# =========================
+
 def load_all_data():
+
     global ACCESS_CODES, USERS_DB, STATS
+
     if os.path.exists(CODES_FILE):
+
         try:
+
             with open(CODES_FILE, "r") as f:
                 ACCESS_CODES = json.load(f)
+
         except:
             ACCESS_CODES = {}
+
     if os.path.exists(USERS_FILE):
+
         try:
+
             with open(USERS_FILE, "r") as f:
                 USERS_DB = json.load(f)
+
         except:
             USERS_DB = {}
+
     if os.path.exists(STATS_FILE):
+
         try:
+
             with open(STATS_FILE, "r") as f:
                 STATS = json.load(f)
+
         except:
             STATS = {}
 
+# =========================
+# SAVE DATA
+# =========================
+
 def save_all_data():
+
     with open(CODES_FILE, "w") as f:
         json.dump(ACCESS_CODES, f)
+
     with open(USERS_FILE, "w") as f:
         json.dump(USERS_DB, f)
+
     with open(STATS_FILE, "w") as f:
         json.dump(STATS, f)
 
+# =========================
+# CHECK CODE
+# =========================
+
 def is_code_valid(user_id, code):
+
     if code not in ACCESS_CODES:
         return False, "❌ الكود غير موجود"
+
     code_data = ACCESS_CODES[code]
+
     if code_data["expires_at"]:
-        expires = datetime.fromisoformat(code_data["expires_at"])
+
+        expires = datetime.fromisoformat(
+            code_data["expires_at"]
+        )
+
         if datetime.now() > expires:
-            return False, "⏰ الكود انتهت صلاحيته"
-    if code_data["max_uses"] > 0 and code_data["used_count"] >= code_data["max_uses"]:
-        return False, f"❌ تم استخدام الكود الحد الأقصى ({code_data['max_uses']} مرات)"
-    return True, "✅ كود صحيح"
+            return False, "⏰ انتهت صلاحية الكود"
+
+    if (
+        code_data["max_uses"] > 0
+        and code_data["used_count"] >= code_data["max_uses"]
+    ):
+
+        return False, "❌ تم استهلاك الكود"
+
+    return True, "✅"
+
+# =========================
+# EXTRACT DRIVE ID
+# =========================
 
 def extract_drive_id(url):
+
     patterns = [
         r"/file/d/([a-zA-Z0-9_-]+)",
         r"id=([a-zA-Z0-9_-]+)",
         r"/open\?id=([a-zA-Z0-9_-]+)"
     ]
+
     for pattern in patterns:
+
         match = re.search(pattern, url)
+
         if match:
             return match.group(1)
+
     return None
 
-def extract_pixeldrain_id(url):
-    match = re.search(r'pixeldrain\.com/u/([a-zA-Z0-9]+)', url)
-    if match:
-        return match.group(1)
-    match = re.search(r'pixeldrain\.com/l/([a-zA-Z0-9]+)', url)
-    if match:
-        return match.group(1), "list"
-    return None
+# =========================
+# URL TO COMBO
+# =========================
 
 async def convert_url_to_combo(url):
+
     try:
-        match = re.search(r':([^/:]+:[^/]+)$', url)
+
+        match = re.search(
+            r':([^/:]+:[^/]+)$',
+            url
+        )
+
         if match:
             return match.group(1).strip()
+
         if ':' in url:
+
             parts = url.split(':')
+
             if len(parts) >= 2:
                 return ':'.join(parts[-2:])
+
         return None
+
     except:
         return None
 
+# =========================
+# MAIN MENU
+# =========================
+
 def get_main_menu():
+
     keyboard = [
-        [InlineKeyboardButton("🔍 البحث", callback_data="search"), InlineKeyboardButton("📁 الملفات", callback_data="files")],
-        [InlineKeyboardButton("🔄 Combo Converter", callback_data="converter"), InlineKeyboardButton("📊 الإحصائيات", callback_data="stats")],
-        [InlineKeyboardButton("💳 الاشتراك", callback_data="subscription"), InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings")],
-        [InlineKeyboardButton("❓ المساعدة", callback_data="help"), InlineKeyboardButton("🆔 معلوماتي", callback_data="myinfo")],
+
+        [
+            InlineKeyboardButton(
+                "🔍 البحث",
+                callback_data="search"
+            ),
+
+            InlineKeyboardButton(
+                "📁 الملفات",
+                callback_data="files"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "🔄 Combo Converter",
+                callback_data="converter"
+            ),
+
+            InlineKeyboardButton(
+                "📊 الإحصائيات",
+                callback_data="stats"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "💳 الاشتراك",
+                callback_data="subscription"
+            ),
+
+            InlineKeyboardButton(
+                "⚙️ الإعدادات",
+                callback_data="settings"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "❓ المساعدة",
+                callback_data="help"
+            ),
+
+            InlineKeyboardButton(
+                "🆔 معلوماتي",
+                callback_data="myinfo"
+            )
+        ]
     ]
+
     return InlineKeyboardMarkup(keyboard)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================
+# START
+# =========================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     load_all_data()
+
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name
+
     if str(user_id) not in USERS_DB:
+
         USERS_DB[str(user_id)] = {
+
             "first_name": first_name,
             "joined": datetime.now().isoformat(),
             "status": "free",
@@ -136,346 +264,408 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "conversions": 0,
             "access_code": None
         }
+
         save_all_data()
+
     welcome_text = (
-        f"╔═══════════════════════════════════╗\n"
-        f"║   🤖 بوت البحث والتحويل v5.0 ⚡  ║\n"
-        f"║                                   ║\n"
-        f"║        مرحباً {first_name} 👋         ║\n"
-        f"╚═══════════════════════════════════╝\n\n"
-        f"🎯 اختر من الخيارات أدناه للبدء!"
+        f"🤖 أهلاً {first_name}\n\n"
+        f"بوت البحث والتحويل جاهز 🚀"
     )
-    await update.message.reply_text(welcome_text, reply_markup=get_main_menu())
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=get_main_menu()
+    )
+
+# =========================
+# BUTTONS
+# =========================
+
+async def button_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     query = update.callback_query
+
     await query.answer()
+
     if query.data == "search":
-        files_ready = os.path.exists(DATA_DIR) and bool(list(Path(DATA_DIR).rglob("*.txt")))
-        status = "✅ الملفات جاهزة للبحث" if files_ready else "⚠️ لا توجد ملفات - أرسل رابط Drive أولاً"
+
         await query.edit_message_text(
-            text=f"🔍 *وضع البحث*\n\n{status}\n\n📝 أرسل الكلمة التي تريد البحث عنها",
-            parse_mode="Markdown"
+            "🔍 أرسل كلمة البحث"
         )
+
         context.user_data["mode"] = "search"
+
     elif query.data == "converter":
+
         await query.edit_message_text(
-            text="🔄 *محول URL إلى Combo*\n\n📤 أرسل ملف TXT يحتوي على URLs\n⏳ سأقوم بتحويلها إلى combos\n\n📌 مثال URL:\nhttps://my.tod.tv/....:+201206971267:Ah*01062697647\n\n📌 سيصبح:\n+201206971267:Ah*01062697647"
+            "📤 أرسل ملف TXT للتحويل"
         )
+
         context.user_data["mode"] = "converter"
+
     elif query.data == "stats":
-        load_all_data()
+
         user_id = str(update.effective_user.id)
+
         user_data = USERS_DB.get(user_id, {})
+
         await query.edit_message_text(
-            text=f"📊 *إحصائياتك*\n\n🔍 عدد البحثيات: {user_data.get('searches', 0)}\n🔄 عدد التحويلات: {user_data.get('conversions', 0)}\n⭐ النقاط: {(user_data.get('searches', 0) + user_data.get('conversions', 0)) * 10}"
+            f"📊 Searches: {user_data.get('searches',0)}\n"
+            f"🔄 Conversions: {user_data.get('conversions',0)}"
         )
-    elif query.data == "subscription":
-        keyboard = [
-            [InlineKeyboardButton("🎁 مجاني", callback_data="plan_free"), InlineKeyboardButton("⭐ بريميوم", callback_data="plan_premium")],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="back")]
-        ]
-        await query.edit_message_text(
-            text="💳 *الخطط*\n\n🎁 *مجاني*: بحث أساسي\n⭐ *بريميوم*: بحث متقدم + تحويل غير محدود",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    elif query.data == "settings":
-        keyboard = [
-            [InlineKeyboardButton("🎟️ إدخال كود", callback_data="enter_code")],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="back")]
-        ]
-        await query.edit_message_text(text="⚙️ *الإعدادات*", reply_markup=InlineKeyboardMarkup(keyboard))
-    elif query.data == "enter_code":
-        await query.edit_message_text(text="🎟️ أرسل الكود:")
-        context.user_data["mode"] = "redeem"
+
     elif query.data == "help":
+
         await query.edit_message_text(
-            text="❓ *المساعدة*\n\n🔍 البحث: ابحث في الملفات\n🔄 التحويل: حول URLs إلى combos\n\n💬 للتواصل: @support"
+            "💬 أرسل رابط Google Drive ZIP ثم ابحث."
         )
+
     elif query.data == "myinfo":
+
         user = update.effective_user
+
         await query.edit_message_text(
-            text=f"🆔 *معلوماتك*\n\n👤 الاسم: {user.first_name}\n📱 ID: `{user.id}`"
+            f"👤 {user.first_name}\n"
+            f"🆔 {user.id}"
         )
+
     elif query.data == "back":
-        await query.edit_message_text(text="🏠 *القائمة الرئيسية*", reply_markup=get_main_menu())
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    load_all_data()
-    user_id = str(update.effective_user.id)
-    document = update.message.document
-    if not document.file_name.endswith('.txt'):
-        await update.message.reply_text("❌ الرجاء إرسال ملف TXT فقط")
-        return
-    file = await context.bot.get_file(document.file_id)
-    await file.download_to_drive("temp_file.txt")
-    combos = []
-    with open("temp_file.txt", "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
-    total = len(lines)
-    processed = 0
-    status_msg = await update.message.reply_text("⏳ جاري المعالجة...\n\n📊 Progress: 0%")
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if line:
-            combo = await convert_url_to_combo(line)
-            if combo:
-                combos.append(combo)
-        processed += 1
-        percentage = (processed / total) * 100
-        if processed % max(1, total // 10) == 0:
-            bar_length = 20
-            filled = int(bar_length * percentage / 100)
-            bar = "█" * filled + "░" * (bar_length - filled)
-            await status_msg.edit_text(
-                f"⏳ جاري المعالجة...\n\n[{bar}] {percentage:.1f}%\n✅ تم: {processed}/{total}\n🎯 Combos: {len(combos)}"
-            )
-    if not combos:
-        await status_msg.edit_text("❌ لم يتم العثور على أي combos")
-        os.remove("temp_file.txt")
-        return
-    output_file = "combos_converted.txt"
-    with open(output_file, "w", encoding="utf-8") as f:
-        for combo in combos:
-            f.write(combo + "\n")
-    USERS_DB[user_id]["conversions"] += 1
-    save_all_data()
-    success_percentage = (len(combos) / total) * 100
-    await status_msg.edit_text(
-        f"✅ تم بنجاح! 🎉\n\n📊 URLs: {total}\n✅ Combos: {len(combos)}\n⚡ النسبة: {success_percentage:.1f}%"
-    )
-    with open(output_file, "rb") as f:
-        await update.message.reply_document(document=f, filename="combos_converted.txt", caption=f"📥 Combos ({len(combos)})")
-    os.remove("temp_file.txt")
-
-async def download_and_extract(msg, archive_path, update):
-    import requests
-    # تحميل مع progress
-    response = requests.get(archive_path if archive_path.startswith("http") else archive_path, stream=True)
-    return response
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    load_all_data()
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-    mode = context.user_data.get("mode", "normal")
-
-    if mode == "redeem":
-        valid, msg = is_code_valid(user_id, text)
-        if not valid:
-            await update.message.reply_text(f"❌ {msg}")
-            return
-        context.user_data["access_code"] = text
-        ACCESS_CODES[text]["used_count"] += 1
-        save_all_data()
-        await update.message.reply_text(
-            f"✅ تم تفعيل الكود!\n\n🎟️ الكود: {text}",
+        await query.edit_message_text(
+            "🏠 القائمة الرئيسية",
             reply_markup=get_main_menu()
         )
-        context.user_data["mode"] = "normal"
+
+# =========================
+# HANDLE TXT FILE
+# =========================
+
+async def handle_document(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    user_id = str(update.effective_user.id)
+
+    document = update.message.document
+
+    if not document.file_name.endswith(".txt"):
+
+        await update.message.reply_text(
+            "❌ أرسل TXT فقط"
+        )
+
         return
 
-    # ===== PIXELDRAIN =====
-    if "pixeldrain.com" in text:
-        msg = await update.message.reply_text("⬇️ جاري تحميل من Pixeldrain...")
-        try:
-            import requests
-            # استخراج الـ ID
-            pd_match = re.search(r'pixeldrain\.com/[ul]/([a-zA-Z0-9]+)', text)
-            if not pd_match:
-                await msg.edit_text("❌ رابط Pixeldrain غير صحيح")
-                return
-            file_id = pd_match.group(1)
-            # API ديال Pixeldrain مجاني بلا token
-            api_url = f"https://pixeldrain.com/api/file/{file_id}"
-            info_url = f"https://pixeldrain.com/api/file/{file_id}/info"
-            # الحصول على معلومات الملف
-            info = requests.get(info_url).json()
-            file_name = info.get("name", "data_archive.zip")
-            ext = file_name.split(".")[-1].lower()
-            archive_path = f"data_archive.{ext}"
-            # تحميل الملف مع progress
-            response = requests.get(api_url, stream=True)
-            total_size = int(response.headers.get("content-length", 0))
-            downloaded = 0
-            with open(archive_path, "wb") as zf:
-                for chunk in response.iter_content(chunk_size=1024*1024):
-                    if chunk:
-                        zf.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            if downloaded % (1024*1024*200) < 1024*1024:
-                                await msg.edit_text(
-                                    f"⬇️ جاري التحميل...\n\n"
-                                    f"📊 {percent:.1f}%\n"
-                                    f"💾 {downloaded//1024//1024}MB / {total_size//1024//1024}MB"
-                                )
-            await msg.edit_text("🔄 جاري استخراج...")
-            if os.path.exists(DATA_DIR):
-                shutil.rmtree(DATA_DIR)
-            os.makedirs(DATA_DIR, exist_ok=True)
-            extract_archive(archive_path, DATA_DIR)
-            txt_files = list(Path(DATA_DIR).rglob("*.txt"))
-            await msg.edit_text(f"✅ تم التحميل!\n\n📄 الملفات: {len(txt_files)}")
-        except Exception as e:
-            await msg.edit_text(f"❌ خطأ: {str(e)[:100]}")
-        return
+    file = await context.bot.get_file(
+        document.file_id
+    )
 
-    # ===== GOFILE =====
-    if "gofile.io" in text:
-        msg = await update.message.reply_text("⬇️ جاري تحميل من Gofile...")
-        try:
-            import requests
-            code = text.strip().split("/")[-1].split("?")[0]
-            session = requests.Session()
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://gofile.io/",
-                "Origin": "https://gofile.io"
-            }
-            guest = session.post("https://api.gofile.io/accounts", headers=headers).json()
-            token = guest["data"]["token"]
-            js_resp = session.get("https://gofile.io/dist/js/alljs.js", headers=headers)
-            wt_match = re.search(r'fetchData\.wt\s*=\s*["\']([^"\']+)["\']', js_resp.text)
-            website_token = wt_match.group(1) if wt_match else "4fd6sg89d7s6"
-            info = session.get(
-                f"https://api.gofile.io/contents/{code}?wt={website_token}",
-                headers={**headers, "Authorization": f"Bearer {token}"}
-            ).json()
-            if info.get("status") != "ok":
-                await msg.edit_text(f"❌ خطأ Gofile: {str(info)[:100]}")
-                return
-            children = info["data"].get("children", {})
-            dl_url = None
-            file_name = "data_archive.zip"
-            for item in children.values():
-                if item.get("type") == "file":
-                    dl_url = item.get("link") or item.get("directLink")
-                    file_name = item.get("name", "data_archive.zip")
-                    break
-            if not dl_url:
-                await msg.edit_text("❌ ما لقيناش ملف في الرابط")
-                return
-            ext = file_name.split(".")[-1].lower()
-            archive_path = f"data_archive.{ext}"
-            response = session.get(
-                dl_url,
-                headers={**headers, "Authorization": f"Bearer {token}"},
-                cookies={"accountToken": token},
-                stream=True
+    await file.download_to_drive("temp.txt")
+
+    combos = []
+
+    with open(
+        "temp.txt",
+        "r",
+        encoding="utf-8",
+        errors="ignore"
+    ) as f:
+
+        lines = f.readlines()
+
+    status = await update.message.reply_text(
+        "⏳ Processing..."
+    )
+
+    for line in lines:
+
+        line = line.strip()
+
+        if line:
+
+            combo = await convert_url_to_combo(
+                line
             )
-            total_size = int(response.headers.get("content-length", 0))
-            downloaded = 0
-            with open(archive_path, "wb") as zf:
-                for chunk in response.iter_content(chunk_size=1024*1024):
-                    if chunk:
-                        zf.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            if downloaded % (1024*1024*100) < 1024*1024:
-                                await msg.edit_text(
-                                    f"⬇️ جاري التحميل...\n\n"
-                                    f"📊 {percent:.1f}%\n"
-                                    f"💾 {downloaded//1024//1024}MB / {total_size//1024//1024}MB"
-                                )
-            await msg.edit_text("🔄 جاري استخراج...")
-            if os.path.exists(DATA_DIR):
-                shutil.rmtree(DATA_DIR)
-            os.makedirs(DATA_DIR, exist_ok=True)
-            extract_archive(archive_path, DATA_DIR)
-            txt_files = list(Path(DATA_DIR).rglob("*.txt"))
-            await msg.edit_text(f"✅ تم التحميل!\n\n📄 الملفات: {len(txt_files)}")
-        except Exception as e:
-            await msg.edit_text(f"❌ خطأ: {str(e)[:100]}")
+
+            if combo:
+                combos.append(combo)
+
+    if not combos:
+
+        await status.edit_text(
+            "❌ لا توجد نتائج"
+        )
+
         return
 
-    # ===== GOOGLE DRIVE =====
+    output_file = "combos.txt"
+
+    with open(
+        output_file,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        for combo in combos:
+            f.write(combo + "\n")
+
+    USERS_DB[user_id]["conversions"] += 1
+
+    save_all_data()
+
+    await status.edit_text(
+        f"✅ تم استخراج {len(combos)}"
+    )
+
+    await update.message.reply_document(
+        document=open(output_file, "rb"),
+        filename="combos.txt"
+    )
+
+# =========================
+# HANDLE TEXT
+# =========================
+
+async def handle_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    text = update.message.text.strip()
+
+    mode = context.user_data.get("mode")
+
+    # =========================
+    # GOOGLE DRIVE
+    # =========================
+
     if "drive.google.com" in text:
+
         file_id = extract_drive_id(text)
+
         if not file_id:
-            await update.message.reply_text("❌ رابط غير صحيح")
+
+            await update.message.reply_text(
+                "❌ رابط خاطئ"
+            )
+
             return
-        msg = await update.message.reply_text("⬇️ جاري تحميل...")
+
+        msg = await update.message.reply_text(
+            "⬇️ Downloading..."
+        )
+
         try:
-            url = f"https://drive.google.com/uc?id={file_id}"
-            gdown.download(url, ZIP_FILE, quiet=False)
-            await msg.edit_text("🔄 جاري استخراج...")
+
+            url = (
+                f"https://drive.google.com/"
+                f"uc?export=download&id={file_id}"
+            )
+
+            gdown.download(
+                url,
+                ZIP_FILE,
+                quiet=False
+            )
+
+            await msg.edit_text(
+                "📦 Extracting..."
+            )
+
             if os.path.exists(DATA_DIR):
                 shutil.rmtree(DATA_DIR)
-            os.makedirs(DATA_DIR, exist_ok=True)
-            with zipfile.ZipFile(ZIP_FILE, 'r') as zip_ref:
+
+            os.makedirs(
+                DATA_DIR,
+                exist_ok=True
+            )
+
+            with zipfile.ZipFile(
+                ZIP_FILE,
+                'r'
+            ) as zip_ref:
+
                 zip_ref.extractall(DATA_DIR)
-            txt_files = list(Path(DATA_DIR).rglob("*.txt"))
-            await msg.edit_text(f"✅ تم التحميل!\n\n📄 الملفات: {len(txt_files)}")
+
+            txt_files = list(
+                Path(DATA_DIR).rglob("*.txt")
+            )
+
+            await msg.edit_text(
+                f"✅ Loaded {len(txt_files)} files"
+            )
+
         except Exception as e:
-            await msg.edit_text(f"❌ خطأ: {str(e)[:50]}")
+
+            await msg.edit_text(
+                f"❌ {str(e)}"
+            )
+
         return
 
-    # ===== SEARCH =====
+    # =========================
+    # SEARCH
+    # =========================
+
     if mode == "search":
-        if not os.path.exists(DATA_DIR) or not list(Path(DATA_DIR).rglob("*.txt")):
-            await update.message.reply_text("❌ لا توجد ملفات محملة بعد. أرسل رابط أولاً.")
-            return
+
         keyword = text
-        search_msg = await update.message.reply_text("🔍 بحث...\n⏳ جاري...")
+
         results = []
-        try:
-            txt_files = list(Path(DATA_DIR).rglob("*.txt"))
-            for txt_file in txt_files:
-                try:
-                    with open(txt_file, "r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            if keyword.lower() in line.lower():
-                                results.append(line.rstrip("\n"))
-                except:
-                    pass
-        except:
-            pass
+
+        msg = await update.message.reply_text(
+            "🔍 Searching..."
+        )
+
+        txt_files = list(
+            Path(DATA_DIR).rglob("*.txt")
+        )
+
+        for txt_file in txt_files:
+
+            try:
+
+                with open(
+                    txt_file,
+                    "r",
+                    encoding="utf-8",
+                    errors="ignore"
+                ) as f:
+
+                    for line in f:
+
+                        if keyword.lower() in line.lower():
+                            results.append(
+                                line.strip()
+                            )
+
+            except:
+                pass
+
         if not results:
-            await search_msg.edit_text("😕 لم نجد نتائج")
+
+            await msg.edit_text(
+                "❌ No Results"
+            )
+
             return
-        USERS_DB[str(user_id)]["searches"] += 1
-        save_all_data()
-        result_file = "resultat.txt"
-        with open(result_file, "w", encoding="utf-8") as f:
+
+        output = "results.txt"
+
+        with open(
+            output,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
             for i, line in enumerate(results, 1):
                 f.write(f"{i}. {line}\n")
-        await search_msg.edit_text(f"✅ تم! النتائج: {len(results)}")
-        with open(result_file, "rb") as f:
-            await update.message.reply_document(document=f, filename="results.txt")
 
-async def addcode_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    load_all_data()
+        await msg.edit_text(
+            f"✅ Found {len(results)}"
+        )
+
+        await update.message.reply_document(
+            document=open(output, "rb"),
+            filename="results.txt"
+        )
+
+# =========================
+# ADMIN ADD CODE
+# =========================
+
+async def addcode_cmd(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     user_id = update.effective_user.id
+
     if user_id not in ADMIN_IDS:
-        await update.message.reply_text("❌ Admin only")
+
+        await update.message.reply_text(
+            "❌ Admin only"
+        )
+
         return
+
     if len(context.args) < 3:
-        await update.message.reply_text("/addcode <code> <uses> <expiry>")
+
+        await update.message.reply_text(
+            "/addcode CODE USES DATE"
+        )
+
         return
+
     code = context.args[0]
+
     max_uses = int(context.args[1])
+
     expiry_date = context.args[2]
+
     ACCESS_CODES[code] = {
+
         "max_uses": max_uses,
         "used_count": 0,
-        "expires_at": f"{expiry_date}T23:59:59"
+        "expires_at":
+        f"{expiry_date}T23:59:59"
     }
+
     save_all_data()
-    await update.message.reply_text(f"✅ تم: {code}")
+
+    await update.message.reply_text(
+        f"✅ Added {code}"
+    )
+
+# =========================
+# MAIN
+# =========================
 
 def main():
+
     load_all_data()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addcode", addcode_cmd))
-    app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    print("🚀 بوت البحث والتحويل شغال! ✅")
+
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+
+    app.add_handler(
+        CommandHandler("start", start)
+    )
+
+    app.add_handler(
+        CommandHandler("addcode", addcode_cmd)
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(button_callback)
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.Document.ALL,
+            handle_document
+        )
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            handle_text
+        )
+    )
+
+    print("BOT ONLINE")
+
     app.run_polling()
+
+# =========================
 
 if __name__ == "__main__":
     main()
