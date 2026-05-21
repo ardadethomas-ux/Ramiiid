@@ -32,6 +32,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "0").split(",")]
 DATA_DIR = "extracted_files"
 ARCHIVE_FILE = "data_archive"
+ZIP_FILE = "data.zip"
 CODES_FILE = "access_codes.json"
 USERS_FILE = "users_db.json"
 STATS_FILE = "stats.json"
