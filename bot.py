@@ -436,9 +436,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             txt_files = list(Path(DATA_DIR).rglob("*.txt"))
 
-            await msg.edit_text(f"✅ تم التحميل!
-
-📄 الملفات: {len(txt_files)}")
+            await msg.edit_text(f"✅ تم التحميل!\n\n📄 الملفات: {len(txt_files)}")
         except Exception as e:
             await msg.edit_text(f"❌ خطأ: {str(e)[:50]}")
         return
